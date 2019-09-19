@@ -5,6 +5,53 @@
 const util = require( "../../util" );
 const VERSION = require( "../../../package.json" ).version;
 
+// Will return true if trace is true or an object
+const shouldTrace = (options = {}, ruleName = 'any') => {
+    const { trace } = options;
+
+    if (typeof trace === 'object') {
+        const { rules = [] } = trace;
+        if (rules.length > 0) {
+            return ruleName === 'any' || rules.some(r => r.toUpperCase() === ruleName.toUpperCase());
+        }
+        else {
+            // Do not trace if no rules are provided
+            return false;
+        }
+    }
+
+    return trace;
+}
+
+// Yields a call to peg$tracer.trace for the match rule
+const toMatchTraceSyntax = (ruleNameCode, resultCode) => {
+    const resultSyntax = resultCode
+        ? "    result: " + resultCode + ","
+        : "    result: cached.result,";
+
+    return [
+        "  peg$tracer.trace({",
+        "    type: \"rule.match\",",
+        "    rule: " + ruleNameCode + ",",
+        resultSyntax,
+        "    location: peg$computeLocation(startPos, peg$currPos)",
+        "  });"
+    ];
+};
+
+// Yields an entire else block for the fail rule
+const toFailTraceSyntax = (ruleNameCode) => {
+    return [
+        "else {",
+        "  peg$tracer.trace({",
+        "    type: \"rule.fail\",",
+        "    rule: " + ruleNameCode + ",",
+        "    location: peg$computeLocation(startPos, startPos)",
+        "  });",
+        "}"
+    ];
+};
+
 // Generates parser JavaScript code.
 function generateJS( ast, session, options ) {
 
@@ -175,7 +222,7 @@ function generateJS( ast, session, options ) {
             ""
         ].join( "\n" ) );
 
-        if ( options.trace ) {
+        if ( shouldTrace(options, 'enter') ) {
 
             parts.push( [
                 "peg$tracer.trace({",
@@ -210,23 +257,21 @@ function generateJS( ast, session, options ) {
                 ""
             ].join( "\n" ) );
 
-            if ( options.trace ) {
+            if ( shouldTrace(options) ) {
+
+                const traceMatch = shouldTrace(options, 'match')
+                    ? toMatchTraceSyntax(ruleNameCode)
+                    : [];
+
+                const traceFailure = shouldTrace(options, 'fail')
+                    ? toFailTraceSyntax(ruleNameCode)
+                    : [];
 
                 parts.push( [
                     "if (cached.result !== peg$FAILED) {",
-                    "  peg$tracer.trace({",
-                    "    type: \"rule.match\",",
-                    "    rule: " + ruleNameCode + ",",
-                    "    result: cached.result,",
-                    "    location: peg$computeLocation(startPos, peg$currPos)",
-                    "  });",
-                    "} else {",
-                    "  peg$tracer.trace({",
-                    "    type: \"rule.fail\",",
-                    "    rule: " + ruleNameCode + ",",
-                    "    location: peg$computeLocation(startPos, startPos)",
-                    "  });",
+                    ...traceMatch,
                     "}",
+                    ...traceFailure,
                     ""
                 ].join( "\n" ) );
 
@@ -261,24 +306,22 @@ function generateJS( ast, session, options ) {
 
         }
 
-        if ( options.trace ) {
+        if ( shouldTrace(options) ) {
+
+            const traceMatch = shouldTrace(options, 'match')
+                ? toMatchTraceSyntax(ruleNameCode, resultCode)
+                : [];
+
+            const traceFailure = shouldTrace(options, 'fail')
+                ? toFailTraceSyntax(ruleNameCode)
+                : [];
 
             parts.push( [
                 "",
                 "if (" + resultCode + " !== peg$FAILED) {",
-                "  peg$tracer.trace({",
-                "    type: \"rule.match\",",
-                "    rule: " + ruleNameCode + ",",
-                "    result: " + resultCode + ",",
-                "    location: peg$computeLocation(startPos, peg$currPos)",
-                "  });",
-                "} else {",
-                "  peg$tracer.trace({",
-                "    type: \"rule.fail\",",
-                "    rule: " + ruleNameCode + ",",
-                "    location: peg$computeLocation(startPos, startPos)",
-                "  });",
-                "}"
+                ...traceMatch,
+                "}",
+                ...traceFailure,
             ].join( "\n" ) );
 
         }
@@ -369,7 +412,7 @@ function generateJS( ast, session, options ) {
             "function peg$parseRule(index) {"
         ].join( "\n" ) );
 
-        if ( options.trace ) {
+        if ( shouldTrace(options) ) {
 
             parts.push( [
                 "  var bc = peg$bytecode[index];",
@@ -1155,7 +1198,7 @@ function generateJS( ast, session, options ) {
             ""
         ].join( "\n" ) );
 
-        if ( options.trace ) {
+        if ( shouldTrace(options) ) {
 
             if ( use( "DefaultTracer" ) )
 
@@ -1652,7 +1695,7 @@ function generateJS( ast, session, options ) {
 
         function generateParserObject() {
 
-            return options.trace && use( "DefaultTracer" )
+            return shouldTrace(options) && use( "DefaultTracer" )
                 ? [
                     "{",
                     "  SyntaxError: peg$SyntaxError,",
@@ -1671,7 +1714,7 @@ function generateJS( ast, session, options ) {
 
         function generateParserExports() {
 
-            return options.trace && use( "DefaultTracer" )
+            return shouldTrace(options) && use( "DefaultTracer" )
                 ? [
                     "{",
                     "  peg$SyntaxError as SyntaxError,",
